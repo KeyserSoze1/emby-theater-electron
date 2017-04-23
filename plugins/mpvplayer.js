@@ -261,8 +261,8 @@ define(['apphost', 'pluginManager', 'events', 'embyRouter'], function (appHost, 
             var requestBody = {
                 path: url,
                 isVideo: isVideo,
-                //item: options.item,
-                //mediaSource: mediaSource,
+                item: JSON.stringify(options.item),
+                mediaSource: JSON.stringify(mediaSource),
                 startPositionTicks: options.playerStartPositionTicks || 0,
                 fullscreen: enableFullscreen
             };
