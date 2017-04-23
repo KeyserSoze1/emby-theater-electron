@@ -7,6 +7,7 @@ var playerWindowId
 var mpvPath
 var playMediaSource
 var playerStatus
+var externalSubIndexes
 var playerStarted = false;
 
 function alert(text) {
@@ -24,8 +25,7 @@ function download(url, dest) {
         var request = http.get(url, function(response) {
             response.pipe(file);
             file.on('finish', function() {
-                file.close();  // close() is async, call cb after close completes.
-                resolve();
+                file.close(resolve);  // close() is async, call cb after close completes.
             });
         }).on('error', function(err) { // Handle errors
             fs.unlink(dest); // Delete the file async. (But we don't check the result)
@@ -96,7 +96,7 @@ function set_audiostream(index) {
 
 function set_subtitlestream(index) {
     if (index < 0) {
-        mpvPlayer.setProperty("sid", "off");
+        mpvPlayer.setProperty("sid", "no");
     } else {
         var subIndex = 0;
         var i, length, stream;
@@ -108,11 +108,18 @@ function set_subtitlestream(index) {
 
                 if (stream.Index == index) {
                     if (stream.DeliveryMethod === 'External') {
-                        var os = require('os');
-                        var subtitlefile = os.tmpdir() + "/" + stream.DisplayTitle + "." + stream.Codec.toLowerCase();
-                        download(stream.DeliveryUrl, subtitlefile).then(() => {
-                            mpvPlayer.addSubtitles(subtitlefile, "cached", stream.DisplayTitle, stream.Language);
-                        });
+                        if (stream.Index in externalSubIndexes) {
+                            mpvPlayer.setProperty("sid", externalSubIndexes[stream.Index]);
+                        } else {
+                            var os = require('os');
+                            var subtitlefile = os.tmpdir() + "/" + "subtitle" + new Date().getTime() + "." + stream.Codec.toLowerCase();
+                            download(stream.DeliveryUrl, subtitlefile).then(() => {
+                                mpvPlayer.addSubtitles(subtitlefile, "select", stream.DisplayTitle, stream.Language);
+                                mpvPlayer.getProperty('sid').then(function(sid) {
+                                    externalSubIndexes[stream.Index] = sid;
+                                });
+                            });
+                        }
                     } else {
                         mpvPlayer.setProperty("sid", subIndex);
                     }
@@ -155,16 +162,19 @@ function processRequest(request, callback) {
 
         case 'play':
             createMpv();
+            externalSubIndexes = { };
             var data = url_parts.query["path"];
             var startPositionTicks = url_parts.query["startPositionTicks"];
             playMediaSource = JSON.parse(url_parts.query["mediaSource"]);
             //console.log(playMediaSource);
 
             play(data).then(() => {
+                set_audiostream(playMediaSource.DefaultAudioStreamIndex);
+                set_subtitlestream(playMediaSource.DefaultSubtitleStreamIndex);
                 if (startPositionTicks != 0) {
                     set_position(startPositionTicks);
-                }
-                set_subtitlestream(playMediaSource.DefaultSubtitleStreamIndex);
+                }   
+                
                 callback(getReturnJson(startPositionTicks));
             });
 
