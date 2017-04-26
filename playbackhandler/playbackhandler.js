@@ -8,7 +8,9 @@ var mpvPath
 var playMediaSource
 var playerStatus
 var externalSubIndexes
+var playerConfig
 var playerStarted = false;
+var playerStopped = false;
 
 function alert(text) {
     require('electron').dialog.showMessageBox(mainWindowRef, {
@@ -29,7 +31,7 @@ function download(url, dest) {
             });
         }).on('error', function (err) { // Handle errors
             fs.unlink(dest); // Delete the file async. (But we don't check the result)
-            resolve();
+            reject();
         });
     });
 }
@@ -44,7 +46,7 @@ function play(path) {
             setTimeout(function () {
                 if (playerStarted) resolve();
                 if (--i) checkStarted(i);
-                else resolve();
+                else reject();
             }, 100)
         })(100);
     });
@@ -119,6 +121,8 @@ function set_subtitlestream(index) {
                                 mpvPlayer.addSubtitles(subtitlefile, "select", stream.DisplayTitle, stream.Language);
                                 mpvPlayer.getProperty('sid').then(function (sid) {
                                     externalSubIndexes[stream.Index] = sid;
+                                }).catch(() => {
+                                    console.log("Failed to download " + stream.DeliveryUrl);
                                 });
                             });
                         }
@@ -130,6 +134,34 @@ function set_subtitlestream(index) {
                 }
             }
         }
+    }
+}
+
+function set_config(config) {
+    if (!mpvPlayer) return;
+
+    if (config.Video.hwdec != null) {
+        mpvPlayer.setProperty("hwdec", config.Video.hwdec.toLowerCase());
+    }
+
+    if (config.Video['video-output-levels'] != null) {
+        mpvPlayer.setProperty("video-output-levels", config.Video['video-output-levels'].toLowerCase());
+    }
+
+    if (config.Video.deinterlace != null) {
+        mpvPlayer.setProperty("deinterlace", config.Video.deinterlace.toLowerCase());
+    }
+
+    if (config.Audio['audio-spdif'] != null) {
+        mpvPlayer.setProperty("audio-spdif", config.Audio['audio-spdif'].toLowerCase());
+    }
+    
+    if (config.Audio['audio-channels'] != null) {
+        mpvPlayer.setProperty("audio-channels", config.Audio['audio-channels'].toLowerCase());
+    }
+
+    if (config.Audio['ad-lavc-ac3drc'] != null) {
+        mpvPlayer.setProperty("ad-lavc-ac3drc", config.Audio['ad-lavc-ac3drc'].toLowerCase());
     }
 }
 
@@ -192,6 +224,8 @@ function processRequest(request, body, callback) {
                 }
 
                 getReturnJson(startPositionTicks).then(callback);
+            }).catch(() => {
+                callback(null);
             });
 
             break;
@@ -246,6 +280,11 @@ function processRequest(request, body, callback) {
             set_subtitlestream(data);
             getReturnJson().then(callback);
             break;
+        case 'config':
+            playerConfig = JSON.parse(body);
+            set_config(playerConfig);
+            getReturnJson().then(callback);
+            break;
         default:
             // This could be a refresh, e.g. player polling for data
             getReturnJson().then(callback);
@@ -294,6 +333,7 @@ function createMpv() {
 
     mpvPlayer.on('started', function () {
         playerStarted = true;
+        playerStopped = false;
         mainWindowRef.focus();
     });
 
@@ -303,7 +343,12 @@ function createMpv() {
 
     mpvPlayer.on('stopped', function () {
         timeposition = 0;
+        playerStopped = true;
     });
+
+    if (playerConfig) {
+        set_config(playerConfig);
+    }
 }
 
 function processNodeRequest(req, res) {
@@ -318,9 +363,13 @@ function processNodeRequest(req, res) {
         // at this point, `body` has the entire request body stored in it as a string
 
         processRequest(req, body, function (json) {
-
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(json);
+            if (json != null) {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(json);
+            } else {
+                res.writeHead(500);
+                res.end();
+            }
         });
     });
 }
